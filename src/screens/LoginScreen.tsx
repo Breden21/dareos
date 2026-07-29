@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Building2, Mail, Lock, Eye, EyeOff, UserCircle } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, UserCircle } from "lucide-react";
 import { ACCOUNTS } from "../lib/accounts";
 import { IconChip } from "../components/ui/atoms";
 import type { Account } from "../lib/types";
@@ -24,7 +24,7 @@ export function LoginScreen({ onLogin }: { onLogin: (account: Account) => void }
     <div className="min-h-screen bg-bg px-6 py-10">
       <div className="mb-8 text-center">
         <div className="w-12 h-12 rounded-2xl bg-chrome mx-auto mb-4 flex items-center justify-center shadow-[0_4px_14px_rgba(5,37,96,0.3)]">
-          <Building2 size={23} className="text-accent" strokeWidth={2} />
+          <img src="/brand-mark.png" alt="" className="w-6 h-6" />
         </div>
         <div className="text-2xl font-display font-semibold tracking-tight mb-1 text-ink">Dare OS</div>
         <div className="text-sm text-dim">Rural District Council Operating System</div>

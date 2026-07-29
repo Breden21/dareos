@@ -1,5 +1,5 @@
 import React from "react";
-import { Building2, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import type { TabDef } from "./Shell";
 import type { Account, TabKey } from "../../lib/types";
 
@@ -21,7 +21,7 @@ export function Sidebar({
       <div className="px-5 pt-6 pb-5 border-b border-chromeLine">
         <div className="flex items-center gap-2.5 mb-4">
           <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center flex-shrink-0">
-            <Building2 size={16} className="text-chrome" strokeWidth={2.4} />
+            <img src="/brand-mark.png" alt="" className="w=8 h=8 flex-shrink-0" />
           </div>
           <div>
             <div className="font-display text-[15px] font-semibold text-chromeInk leading-tight">Dare OS</div>
