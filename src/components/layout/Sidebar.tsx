@@ -24,12 +24,12 @@ export function Sidebar({
             <img src="/brand-mark.png" alt="" className="w=8 h=8 flex-shrink-0" />
           </div>
           <div>
-            <div className="font-display text-[15px] font-semibold text-chromeInk leading-tight">Dare OS</div>
-            <div className="text-[10.5px] text-chromeFaint">Mutasa RDC</div>
+            <div className="font-display text-[15px] font-semibold text-chromeInk leading-tight">CORA</div>
+            <div className="text-[10.5px] text-chromeFaint">Makoni RDC</div>
           </div>
         </div>
         <button className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-chromeLine bg-chromeAlt text-xs text-chromeInk">
-          Mutasa RDC
+          Makoni RDC
           <ChevronDown size={14} className="text-chromeFaint" />
         </button>
       </div>

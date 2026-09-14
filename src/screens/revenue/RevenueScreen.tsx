@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import type { RevenueSub } from "../../lib/types";
+import type { Account, RevenueSub } from "../../lib/types";
 import { OverviewSub } from "./OverviewSub";
 import { CollectionSub } from "./CollectionSub";
 import { RatepayersSub } from "./RatepayersSub";
@@ -14,7 +14,7 @@ const SUBS: [RevenueSub, string][] = [
   ["reconcile", "Reconcile"],
 ];
 
-export function RevenueScreen({ initialSub }: { initialSub: RevenueSub }) {
+export function RevenueScreen({ initialSub, account }: { initialSub: RevenueSub; account: Account }) {
   const [sub, setSub] = useState<RevenueSub>(initialSub);
 
   return (
@@ -34,10 +34,10 @@ export function RevenueScreen({ initialSub }: { initialSub: RevenueSub }) {
       </div>
 
       {sub === "overview" && <OverviewSub />}
-      {sub === "collection" && <CollectionSub />}
+      {sub === "collection" && <CollectionSub account={account} />}
       {sub === "ratepayers" && <RatepayersSub />}
       {sub === "stands" && <StandsSub />}
-      {sub === "reconcile" && <ReconcileSub />}
+      {sub === "reconcile" && <ReconcileSub account={account} />}
     </div>
   );
 }

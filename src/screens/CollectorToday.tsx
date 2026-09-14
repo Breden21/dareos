@@ -1,45 +1,148 @@
-import React, { useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { Camera, MapPin, Check, ChevronRight, ChevronLeft, Wallet } from "lucide-react";
 import { Card, Badge, SectionHeader, IconChip } from "../components/ui/atoms";
-import { collectionPoints, recentReceipts } from "../lib/mockData";
-import type { Account, Receipt } from "../lib/types";
+import { supabase } from "../lib/supabaseClient";
+import type { Account } from "../lib/types";
 
 const FEE_TYPES = ["Market stall", "Terminus fee", "Parking fee", "Other"];
 
 type Step = "idle" | "feeType" | "amount" | "photo" | "review" | "done";
 
+interface PointRow {
+  id: string;
+  name: string;
+  ward: string;
+  fee_category: string;
+}
+
+interface ReceiptRow {
+  id: string;
+  fee_type: string;
+  amount: number;
+  collector_name: string;
+  banked: boolean;
+  voided: boolean;
+  voided_reason: string | null;
+  created_at: string;
+}
+
+function startOfToday(): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+function timeAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  return `${hrs} hr${hrs !== 1 ? "s" : ""} ago`;
+}
+
 export function CollectorToday({ account }: { account: Account }) {
-  const point = collectionPoints.find((p) => p.id === account.collectionPointId)!;
-  const [myReceipts, setMyReceipts] = useState<Receipt[]>(
-    recentReceipts.filter((r) => r.collector === account.name && r.time !== "yesterday")
-  );
+  const [point, setPoint] = useState<PointRow | null>(null);
+  const [todayReceipts, setTodayReceipts] = useState<ReceiptRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   const [step, setStep] = useState<Step>("idle");
   const [feeType, setFeeType] = useState("");
   const [amount, setAmount] = useState("");
   const [photoAttached, setPhotoAttached] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [lastReceiptNumber, setLastReceiptNumber] = useState("");
+
+  const loadData = useCallback(async () => {
+    if (!account.collectionPointId) return;
+    setLoadError("");
+
+    const [{ data: pointData, error: pointError }, { data: receiptData, error: receiptError }] = await Promise.all([
+      supabase.from("collection_points").select("id, name, ward, fee_category").eq("id", account.collectionPointId).single(),
+      supabase
+        .from("receipts")
+        .select("id, fee_type, amount, collector_name, banked, voided, voided_reason, created_at")
+        .eq("point_id", account.collectionPointId)
+        .gte("created_at", startOfToday())
+        .order("created_at", { ascending: false }),
+    ]);
+
+    if (pointError || receiptError) {
+      setLoadError("Couldn't load your collection point. Try refreshing.");
+    } else {
+      setPoint(pointData);
+      setTodayReceipts(receiptData ?? []);
+    }
+    setLoading(false);
+  }, [account.collectionPointId]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   function reset() {
     setStep("idle");
     setFeeType("");
     setAmount("");
     setPhotoAttached(false);
+    setSubmitError("");
   }
 
-  function submit() {
-    const newReceipt: Receipt = {
-      id: `RCT-${Math.floor(9000 + Math.random() * 900)}`,
-      payer: feeType || "Collection",
-      point: point.name,
-      amount: Number(amount) || 0,
-      collector: account.name,
-      time: "just now",
-    };
-    setMyReceipts([newReceipt, ...myReceipts]);
+  async function submit() {
+    if (!account.collectionPointId) return;
+    setSubmitting(true);
+    setSubmitError("");
+
+    const { data, error } = await supabase
+      .from("receipts")
+      .insert({
+        point_id: account.collectionPointId,
+        fee_type: feeType,
+        amount: Number(amount) || 0,
+        collector_name: account.name,
+      })
+      .select("receipt_number")
+      .single();
+
+    setSubmitting(false);
+
+    if (error || !data) {
+      setSubmitError("Couldn't save this collection. Check your connection and try again.");
+      return;
+    }
+
+    setLastReceiptNumber(data.receipt_number);
+    await loadData();
     setStep("done");
   }
 
-  const todayTotal = point.todayTotal + myReceipts.filter((r) => r.time === "just now").reduce((s, r) => s + r.amount, 0);
+  async function voidReceipt(id: string) {
+    const reason = window.prompt("Why is this collection being voided? (e.g. wrong amount entered)");
+    if (!reason) return;
+    const { error } = await supabase
+      .from("receipts")
+      .update({ voided: true, voided_reason: reason, voided_by: account.id, voided_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) {
+      window.alert("Couldn't void this collection - it may already be banked, which requires a CEO to correct.");
+      return;
+    }
+    await loadData();
+  }
+
+  if (loading) {
+    return <div className="px-3.5 pt-8 text-sm text-dim text-center">Loading your collection point...</div>;
+  }
+
+  if (loadError || !point) {
+    return <div className="px-3.5 pt-8 text-sm text-danger text-center">{loadError || "No collection point assigned to your account."}</div>;
+  }
+
+  const activeReceipts = todayReceipts.filter((r) => !r.voided);
+  const todayTotal = activeReceipts.reduce((s, r) => s + Number(r.amount), 0);
+  const allBanked = activeReceipts.length > 0 && activeReceipts.every((r) => r.banked);
 
   // ---- Guided capture flow ----
   if (step !== "idle") {
@@ -130,7 +233,7 @@ export function CollectorToday({ account }: { account: Account }) {
         {step === "review" && (
           <>
             <div className="font-display text-xl font-semibold text-ink mb-5">Confirm collection</div>
-            <Card className="p-4 mb-6">
+            <Card className="p-4 mb-4">
               {[
                 ["Collection point", point.name],
                 ["Fee type", feeType],
@@ -144,8 +247,13 @@ export function CollectorToday({ account }: { account: Account }) {
                 </div>
               ))}
             </Card>
-            <button onClick={submit} className="w-full py-3.5 rounded-lg bg-accent text-white text-sm font-semibold flex items-center justify-center gap-2">
-              <Check size={16} /> Submit collection
+            {submitError && <div className="text-[11.5px] text-danger mb-2.5">{submitError}</div>}
+            <button
+              onClick={submit}
+              disabled={submitting}
+              className="w-full py-3.5 rounded-lg bg-accent text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Check size={16} /> {submitting ? "Saving..." : "Submit collection"}
             </button>
           </>
         )}
@@ -156,7 +264,12 @@ export function CollectorToday({ account }: { account: Account }) {
               <Check size={30} className="text-success" />
             </div>
             <div className="font-display text-xl font-semibold text-ink mb-1.5">Collection recorded</div>
-            <div className="text-sm text-dim mb-8">${amount} · {feeType} · {point.name}</div>
+            <div className="text-sm text-dim mb-1">${amount} · {feeType} · {point.name}</div>
+            {lastReceiptNumber && (
+              <div className="inline-block px-3 py-1.5 rounded-lg bg-accentSoft text-accent text-xs font-semibold font-mono tracking-wide mb-8">
+                Receipt {lastReceiptNumber}
+              </div>
+            )}
             <button onClick={reset} className="w-full py-3.5 rounded-lg bg-accent text-white text-sm font-semibold">
               Record another
             </button>
@@ -171,13 +284,15 @@ export function CollectorToday({ account }: { account: Account }) {
     <div className="px-3.5 pt-4 pb-6">
       <div className="mb-4">
         <div className="font-display text-lg font-semibold text-ink mb-0.5">{point.name}</div>
-        <div className="text-xs text-dim">{point.type} · {point.ward}</div>
+        <div className="text-xs text-dim">{point.fee_category} · {point.ward}</div>
       </div>
 
-      <Card tone={point.banked ? "success" : "warn"} className="p-4.5 mb-4 text-center">
+      <Card tone={allBanked ? "success" : "warn"} className="p-4.5 mb-4 text-center">
         <div className="text-[11px] text-dim mb-1.5">COLLECTED TODAY</div>
         <div className="font-display text-[34px] font-semibold text-ink mb-2.5">${todayTotal}</div>
-        <Badge tone={point.banked ? "success" : "warn"}>{point.banked ? "Banked" : "Not yet banked"}</Badge>
+        <Badge tone={allBanked ? "success" : "warn"}>
+          {todayReceipts.length === 0 ? "No collections yet" : allBanked ? "Banked" : "Not yet banked"}
+        </Badge>
       </Card>
 
       <button
@@ -189,13 +304,25 @@ export function CollectorToday({ account }: { account: Account }) {
 
       <SectionHeader title="Your receipts today" />
       <Card className="overflow-hidden">
-        {myReceipts.map((r, i, arr) => (
+        {todayReceipts.length === 0 && (
+          <div className="px-3.5 py-4 text-xs text-dim text-center">No collections recorded yet today.</div>
+        )}
+        {todayReceipts.map((r, i, arr) => (
           <div key={r.id} className={`flex justify-between items-center px-3.5 py-3 ${i < arr.length - 1 ? "border-b border-border" : ""}`}>
-            <div>
-              <div className="text-sm text-ink">{r.payer}</div>
-              <div className="text-[10.5px] text-faint mt-0.5">{r.id} · {r.time}</div>
+            <div className={r.voided ? "opacity-50" : ""}>
+              <div className={`text-sm text-ink ${r.voided ? "line-through" : ""}`}>{r.fee_type}</div>
+              <div className="text-[10.5px] text-faint mt-0.5">
+                {r.voided ? `Voided — ${r.voided_reason}` : timeAgo(r.created_at)}
+              </div>
             </div>
-            <div className="text-sm font-semibold text-success">+${r.amount}</div>
+            <div className="flex items-center gap-2.5">
+              <div className={`text-sm font-semibold ${r.voided ? "text-faint line-through" : "text-success"}`}>+${r.amount}</div>
+              {!r.voided && !r.banked && (
+                <button onClick={() => voidReceipt(r.id)} className="text-[10.5px] text-danger underline">
+                  Void
+                </button>
+              )}
+            </div>
           </div>
         ))}
       </Card>

@@ -1,30 +1,28 @@
-# Dare OS — Rural District Council Operating System (Prototype)
+# CORA (Prototype)
 
-Role-based mock frontend for Mutasa Rural District Council. Vite + React +
-TypeScript + Tailwind CSS. All data is mocked (`src/lib/mockData.ts`) — no
-backend yet. Responsive: a full sidebar/topbar desktop layout for the CEO
-role, and a mobile-first app for field roles (collector, ward officer,
-driver, records clerk).
+Role-based digital operations platform, piloting with Makoni Rural District
+Council. Vite + React + TypeScript + Tailwind CSS, backed by Supabase
+(Postgres, Auth, Row Level Security) for real authentication and data.
+Responsive: a full sidebar/topbar desktop layout for the CEO role, and a
+mobile-first app for field roles (collector, ward officer, driver, records
+clerk). Installable as a PWA (see below).
 
-## Demo accounts
+## Accounts
 
-Shown as tappable cards on the login screen, or type them manually:
-
-| Role | Email | Password |
-|---|---|---|
-| CEO | ceo@mutasa.rdc.gov.zw | ceo2026 |
-| Revenue Collector | collector@mutasa.rdc.gov.zw | collect2026 |
-| Ward Officer (Ward 7) | ward7@mutasa.rdc.gov.zw | ward2026 |
-| Fleet Driver | driver@mutasa.rdc.gov.zw | drive2026 |
-| Records Clerk | records@mutasa.rdc.gov.zw | records2026 |
+Real login accounts live in Supabase Auth, with a matching `profiles` row
+per user (role, name, ward/collection point/vehicle scope). There is no
+hardcoded account list in the frontend anymore — see `src/lib/auth.ts` and
+`src/screens/LoginScreen.tsx`. New staff accounts are provisioned via the
+Supabase dashboard (Authentication → Add user), then a matching row is
+inserted into `profiles`.
 
 Each role sees a completely different app — different nav, different home
-screen, scoped to only their own data.
+screen, scoped to only their own data via RLS policies at the database level.
 
 ## Project structure
 
 ```
-dare-os/
+cora/
 ├── src/
 │   ├── components/
 │   │   ├── ui/atoms.tsx          # Card (tone-tinted), Badge, IconChip, Delta, SectionHeader, BackRow
@@ -32,27 +30,28 @@ dare-os/
 │   │       ├── Shell.tsx         # Mobile Header + BottomNav, desktop Topbar
 │   │       └── Sidebar.tsx       # Desktop-only sidebar nav (CEO gets grouped sections)
 │   ├── screens/
-│   │   ├── LoginScreen.tsx       # Demo account picker
+│   │   ├── LoginScreen.tsx       # Email/password sign-in against Supabase Auth
 │   │   ├── ProfileScreen.tsx     # Shared by restricted roles
-│   │   ├── CeoDashboard.tsx      # District Briefing + responsive chart/ward-ranking (desktop only)
-│   │   ├── CollectorToday.tsx    # Guided step-by-step capture flow (fee type → amount → photo → GPS → submit)
+│   │   ├── CeoDashboard.tsx      # District Briefing + revenue/ward/fleet summary, real data
+│   │   ├── CollectorToday.tsx    # Guided step-by-step capture flow (fee type → amount → photo → GPS → submit → receipt number)
 │   │   ├── CollectorHistory.tsx
-│   │   ├── WardOfficerHome.tsx   # Scoped to the officer's own ward
-│   │   ├── DriverHome.tsx        # Scoped to the driver's one vehicle
-│   │   ├── RecordsScreen.tsx     # Digitization tracker — used by CEO tab and Records Clerk home
-│   │   ├── WardScreen.tsx        # CEO's full cross-ward view
-│   │   ├── MoreScreen.tsx        # CEO's fleet + staff + minutes
+│   │   ├── WardOfficerHome.tsx   # Scoped to the officer's own ward; logs/updates real service requests + asset condition
+│   │   ├── DriverHome.tsx        # Scoped to the driver's one vehicle; real GPS + fuel/odometer updates
+│   │   ├── RecordsScreen.tsx     # EFM: real capture, search, category progress
+│   │   ├── WardScreen.tsx        # CEO's full cross-ward view + asset creation
+│   │   ├── MoreScreen.tsx        # CEO's fleet + staff + council minutes, with real capture forms
 │   │   └── revenue/
 │   │       ├── RevenueScreen.tsx # tab strip wiring the 5 sub-views below
-│   │       ├── OverviewSub.tsx
+│   │       ├── OverviewSub.tsx   # month-on-month trend
 │   │       ├── CollectionSub.tsx
-│   │       ├── RatepayersSub.tsx
-│   │       ├── StandsSub.tsx
+│   │       ├── RatepayersSub.tsx # real data + capture form
+│   │       ├── StandsSub.tsx     # real data + capture form
 │   │       └── ReconcileSub.tsx
 │   ├── lib/
-│   │   ├── types.ts              # shared TS interfaces — future API contract
-│   │   ├── accounts.ts           # demo login credentials
-│   │   └── mockData.ts           # single seam to replace with real API calls later
+│   │   ├── types.ts              # shared TS interfaces
+│   │   ├── supabaseClient.ts     # Supabase client singleton (reads .env.local)
+│   │   ├── auth.ts               # shared profile-fetching helper (login + session restore)
+│   │   └── mockData.ts           # legacy reference only - all screens now read from Supabase
 │   ├── App.tsx                   # auth state + role-based tab routing
 │   ├── main.tsx
 │   └── index.css
@@ -80,9 +79,9 @@ dare-os/
 Requires [Node.js](https://nodejs.org) 18+ and npm.
 
 ```bash
-cd dare-os
+cd rdcos-app
 npm install     # once, needs internet
-npm run dev     # localhost:5173 — works offline after install
+npm run dev     # prints a Network URL too - use that to test on your phone
 ```
 
 Production build:
@@ -107,6 +106,7 @@ vercel
 
 ## Notes
 
-- No real authentication — the 5 demo accounts above are hardcoded client-side.
-- No backend — all data in `src/lib/mockData.ts`.
-- No offline data persistence (PWA/service worker) yet.
+- Real authentication via Supabase Auth; role/scope data lives in the `profiles` table.
+- Row Level Security policies, plus column-lock triggers on sensitive tables, enforce data scoping and prevent tampering at the database level, not just in the UI.
+- Installable as a PWA (vite-plugin-pwa) - the app shell works offline, but all data actions still require connectivity; a real offline-capture-and-sync queue is future work.
+- No self-serve staff account creation yet - new users are still provisioned via the Supabase dashboard + a `profiles` insert (see Accounts above).

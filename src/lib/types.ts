@@ -3,8 +3,8 @@ export type StatusTone = "success" | "warn" | "danger" | "accent" | "neutral";
 export type Role = "ceo" | "collector" | "ward_officer" | "driver" | "records_clerk";
 
 export interface Account {
+  id: string;
   email: string;
-  password: string;
   role: Role;
   name: string;
   roleLabel: string;

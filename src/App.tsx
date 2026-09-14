@@ -1,9 +1,11 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   LayoutDashboard, Receipt, FolderOpen, MessageSquare, Users,
   Wallet, ClipboardList, UserCircle, MapPin, Truck,
 } from "lucide-react";
 import type { Account, RevenueSub, TabKey } from "./lib/types";
+import { supabase } from "./lib/supabaseClient";
+import { fetchAccountForUser } from "./lib/auth";
 import { Header, BottomNav, Topbar, type TabDef } from "./components/layout/Shell";
 import { Sidebar } from "./components/layout/Sidebar";
 import { LoginScreen } from "./screens/LoginScreen";
@@ -59,18 +61,46 @@ export default function App() {
   const [account, setAccount] = useState<Account | null>(null);
   const [tab, setTab] = useState<TabKey | null>(null);
   const [revenueSub, setRevenueSub] = useState<RevenueSub>("overview");
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  // On first load, check whether a Supabase session already exists (e.g. the
+  // user refreshed the page) and restore their account/tab instead of
+  // forcing a re-login every time.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreSession() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user && !cancelled) {
+        const acc = await fetchAccountForUser(session.user.id, session.user.email!);
+        if (acc && !cancelled) {
+          setAccount(acc);
+          setTab(ROLE_GROUPS[acc.role][0].tabs[0].key);
+        }
+      }
+      if (!cancelled) setCheckingSession(false);
+    }
+
+    restoreSession();
+    return () => { cancelled = true; };
+  }, []);
 
   function handleLogin(acc: Account) {
     setAccount(acc);
     setTab(ROLE_GROUPS[acc.role][0].tabs[0].key);
   }
-  function handleLogout() {
+  async function handleLogout() {
+    await supabase.auth.signOut();
     setAccount(null);
     setTab(null);
   }
   function goTo(t: string, sub?: string) {
     setTab(t as TabKey);
     if (t === "revenue" && sub) setRevenueSub(sub as RevenueSub);
+  }
+
+  if (checkingSession) {
+    return <div className="min-h-screen bg-bg flex items-center justify-center text-sm text-dim">Loading...</div>;
   }
 
   if (!account || !tab) return <LoginScreen onLogin={handleLogin} />;
@@ -84,8 +114,8 @@ export default function App() {
     if (tab === "profile") return <ProfileScreen account={account!} onLogout={handleLogout} />;
     if (account!.role === "ceo") {
       if (tab === "dashboard") return <CeoDashboard account={account!} onGo={goTo} />;
-      if (tab === "revenue") return <RevenueScreen initialSub={revenueSub} />;
-      if (tab === "records") return <RecordsScreen showCaptureAction={false} />;
+      if (tab === "revenue") return <RevenueScreen initialSub={revenueSub} account={account!} />;
+      if (tab === "records") return <RecordsScreen account={account!} showCaptureAction={false} />;
       if (tab === "ward") return <WardScreen />;
       if (tab === "more") return <MoreScreen />;
     }
@@ -95,7 +125,7 @@ export default function App() {
     }
     if (account!.role === "ward_officer" && tab === "ward_home") return <WardOfficerHome account={account!} />;
     if (account!.role === "driver" && tab === "vehicle_home") return <DriverHome account={account!} />;
-    if (account!.role === "records_clerk" && tab === "records_home") return <RecordsScreen />;
+    if (account!.role === "records_clerk" && tab === "records_home") return <RecordsScreen account={account!} />;
     return null;
   }
 
