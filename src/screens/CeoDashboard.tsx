@@ -47,7 +47,14 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString([], { day: "numeric", month: "short" });
 }
 
-function DistrictBriefing({ greetingName, compact, items }: { greetingName: string; compact?: boolean; items: { tone: StatusTone; text: string }[] }) {
+function timeGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function DistrictBriefing({ compact, items }: { compact?: boolean; items: { tone: StatusTone; text: string }[] }) {
   const dotColor = (tone: StatusTone) => (tone === "danger" ? "#F5A9A0" : tone === "warn" ? "#F0CE8A" : "#8FA0B8");
   return (
     <div className={`rounded-[18px] relative overflow-hidden bg-gradient-to-br from-chrome to-chromeAlt ${compact ? "p-5 h-full" : "p-5 pb-4.5 mb-5"}`}>
@@ -55,7 +62,7 @@ function DistrictBriefing({ greetingName, compact, items }: { greetingName: stri
       <div className="flex items-center gap-2 mb-1 relative">
         <Sunrise size={16} className="text-accent" />
         <span className="text-[11.5px] text-chromeFaint tracking-wide">
-          DISTRICT BRIEFING{greetingName ? ` · GOOD MORNING, ${greetingName.split(" ")[0].toUpperCase()}` : ""}
+          DISTRICT BRIEFING · {timeGreeting().toUpperCase()}
         </span>
       </div>
       <div className="font-display text-xl font-semibold text-white mb-3.5 relative">
@@ -183,12 +190,12 @@ export function CeoDashboard({ account, onGo }: { account: Account; onGo: (tab: 
   return (
     <div className="px-3.5 lg:px-8 pt-4 lg:pt-7 pb-6 lg:pb-10 lg:max-w-[1400px]">
       <div className="hidden lg:block mb-6">
-        <div className="font-display text-2xl font-semibold text-ink">Good morning, {account.name.split(" ")[0]} 👋</div>
+        <div className="font-display text-2xl font-semibold text-ink">{timeGreeting()} 👋</div>
         <div className="text-sm text-dim mt-1">Here's what's happening across Makoni District today.</div>
       </div>
 
       <div className="lg:hidden">
-        <DistrictBriefing greetingName={account.name} items={briefingItems} />
+        <DistrictBriefing items={briefingItems} />
       </div>
 
       <div className="grid grid-cols-3 lg:grid-cols-4 gap-2 lg:gap-3 mb-5 lg:mb-6">
@@ -254,7 +261,7 @@ export function CeoDashboard({ account, onGo }: { account: Account; onGo: (tab: 
         </Card>
 
         <div className="col-span-1">
-          <DistrictBriefing greetingName="" compact items={briefingItems} />
+          <DistrictBriefing compact items={briefingItems} />
         </div>
       </div>
 
