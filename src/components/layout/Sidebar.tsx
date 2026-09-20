@@ -1,5 +1,4 @@
 import React from "react";
-import { ChevronDown } from "lucide-react";
 import type { TabDef } from "./Shell";
 import type { Account, TabKey } from "../../lib/types";
 
@@ -21,17 +20,13 @@ export function Sidebar({
       <div className="px-5 pt-6 pb-5 border-b border-chromeLine">
         <div className="flex items-center gap-2.5 mb-4">
           <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center flex-shrink-0">
-            <img src="/brand-mark.png" alt="" className="w=8 h=8 flex-shrink-0" />
+            <img src="/brand-mark.png" alt="" className="w-8 h-8 flex-shrink-0" />
           </div>
           <div>
             <div className="font-display text-[15px] font-semibold text-chromeInk leading-tight">CORA</div>
             <div className="text-[10.5px] text-chromeFaint">Makoni RDC</div>
           </div>
         </div>
-        <button className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-chromeLine bg-chromeAlt text-xs text-chromeInk">
-          Makoni RDC
-          <ChevronDown size={14} className="text-chromeFaint" />
-        </button>
       </div>
 
       <nav className="flex-1 px-3 py-4 overflow-y-auto">

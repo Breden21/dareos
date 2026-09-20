@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { Camera, FolderOpen, FileText, Check, Search } from "lucide-react";
-import { Card, SectionHeader, IconChip } from "../components/ui/atoms";
+import { Camera, FolderOpen, FileText, Check, Search, Plus, Landmark, Users } from "lucide-react";
+import { Card, Badge, SectionHeader, IconChip, statusTone } from "../components/ui/atoms";
 import { supabase } from "../lib/supabaseClient";
 import type { Account, StatusTone } from "../lib/types";
+
+// ============================================================
+// Digitized records (EFM) - unchanged from before, just extracted
+// into its own component so it can sit alongside Stands/Ratepayers.
+// ============================================================
 
 interface CategoryRow {
   id: string;
@@ -31,7 +36,7 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString([], { day: "numeric", month: "short" });
 }
 
-export function RecordsScreen({ account, showCaptureAction = true }: { account: Account; showCaptureAction?: boolean }) {
+function DigitizedTab({ account, showCaptureAction }: { account: Account; showCaptureAction: boolean }) {
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({});
@@ -70,9 +75,6 @@ export function RecordsScreen({ account, showCaptureAction = true }: { account: 
     load();
   }, []);
 
-  // Live search across title/category/ward - simple and fast; the schema
-  // also has full-text + fuzzy search infrastructure (search_text, pg_trgm)
-  // ready for a more advanced version of this later if needed.
   useEffect(() => {
     if (!query.trim()) {
       setSearchResults(null);
@@ -115,16 +117,15 @@ export function RecordsScreen({ account, showCaptureAction = true }: { account: 
     await load();
   }
 
-  if (loading) return <div className="px-3.5 pt-8 text-sm text-dim text-center">Loading...</div>;
+  if (loading) return <div className="pt-8 text-sm text-dim text-center">Loading...</div>;
 
   const totalDigitized = categories.reduce((s, c) => s + (categoryCounts[`${c.name}|${c.ward}`] ?? 0), 0);
   const totalAll = categories.reduce((s, c) => s + c.total_estimated, 0);
   const overallPct = totalAll > 0 ? Math.round((totalDigitized / totalAll) * 100) : 0;
-
   const displayedRecords = searchResults ?? records;
 
   return (
-    <div className="px-3.5 pt-4 pb-6">
+    <div>
       {categories.length > 0 && (
         <Card className="p-6 mb-4.5 bg-gradient-to-br from-chrome to-chromeAlt border-0">
           <div className="text-[11.5px] text-chromeFaint mb-2 tracking-wide">ARCHIVE DIGITIZED</div>
@@ -252,6 +253,290 @@ export function RecordsScreen({ account, showCaptureAction = true }: { account: 
           ))}
         </Card>
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Stands tab - Records Clerk now owns this data entry
+// ============================================================
+
+interface StandRow {
+  id: string;
+  stand_number: string;
+  ward: string;
+  buyer_name: string;
+  price: number;
+  amount_paid: number;
+  status: string;
+  date_allocated: string;
+}
+const STAND_TYPES = ["Residential", "Commercial", "Market stall"];
+const STAND_STATUSES = ["Unpaid", "Instalments", "Paid up"];
+
+function StandsTab() {
+  const [stands, setStands] = useState<StandRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+
+  const [standNumber, setStandNumber] = useState("");
+  const [ward, setWard] = useState("");
+  const [standType, setStandType] = useState(STAND_TYPES[0]);
+  const [buyerName, setBuyerName] = useState("");
+  const [price, setPrice] = useState("");
+  const [amountPaid, setAmountPaid] = useState("");
+  const [status, setStatus] = useState(STAND_STATUSES[0]);
+  const [dateAllocated, setDateAllocated] = useState(new Date().toISOString().slice(0, 10));
+
+  async function load() {
+    const { data } = await supabase
+      .from("land_stands")
+      .select("id, stand_number, ward, buyer_name, price, amount_paid, status, date_allocated")
+      .order("date_allocated", { ascending: false });
+    setStands(data ?? []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function submit() {
+    setSubmitting(true);
+    setSubmitError("");
+    const { error } = await supabase.from("land_stands").insert({
+      stand_number: standNumber,
+      ward,
+      stand_type: standType,
+      buyer_name: buyerName,
+      price: Number(price) || 0,
+      amount_paid: Number(amountPaid) || 0,
+      status,
+      date_allocated: dateAllocated,
+    });
+    setSubmitting(false);
+    if (error) {
+      setSubmitError("Couldn't save this stand. Check the details and try again.");
+      return;
+    }
+    setStandNumber(""); setWard(""); setStandType(STAND_TYPES[0]); setBuyerName(""); setPrice(""); setAmountPaid("");
+    setStatus(STAND_STATUSES[0]); setDateAllocated(new Date().toISOString().slice(0, 10));
+    setAdding(false);
+    await load();
+  }
+
+  if (loading) return <div className="pt-8 text-sm text-dim text-center">Loading...</div>;
+
+  return (
+    <div>
+      {!adding && (
+        <button onClick={() => setAdding(true)} className="w-full py-3 rounded-lg bg-accent text-white text-xs font-semibold mb-4 flex items-center justify-center gap-1.5">
+          <Plus size={14} /> Add a stand
+        </button>
+      )}
+      {adding && (
+        <Card className="p-4 mb-4">
+          <div className="text-sm font-semibold text-ink mb-3">New land stand</div>
+          <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+            <input value={standNumber} onChange={(e) => setStandNumber(e.target.value)} placeholder="Stand number" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
+            <input value={ward} onChange={(e) => setWard(e.target.value)} placeholder="Ward" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
+          </div>
+          <input value={buyerName} onChange={(e) => setBuyerName(e.target.value)} placeholder="Buyer name" className="w-full py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent mb-2.5" />
+          <select value={standType} onChange={(e) => setStandType(e.target.value)} className="w-full py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent mb-2.5">
+            {STAND_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+            <input value={price} onChange={(e) => setPrice(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="Price ($)" inputMode="decimal" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
+            <input value={amountPaid} onChange={(e) => setAmountPaid(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="Amount paid ($)" inputMode="decimal" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
+          </div>
+          <div className="grid grid-cols-2 gap-2.5 mb-4">
+            <select value={status} onChange={(e) => setStatus(e.target.value)} className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent">
+              {STAND_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <input type="date" value={dateAllocated} onChange={(e) => setDateAllocated(e.target.value)} className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
+          </div>
+          {submitError && <div className="text-[11.5px] text-danger mb-2.5">{submitError}</div>}
+          <div className="flex gap-2">
+            <button onClick={() => setAdding(false)} className="flex-1 py-2.5 rounded-lg border border-border text-xs font-semibold text-ink">Cancel</button>
+            <button onClick={submit} disabled={!standNumber || !ward || !buyerName || !price || submitting} className="flex-1 py-2.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50">
+              {submitting ? "Saving..." : "Save stand"}
+            </button>
+          </div>
+        </Card>
+      )}
+      {stands.length === 0 && <div className="text-sm text-dim text-center pt-4 px-6">No land stand records yet.</div>}
+      {stands.map((s) => {
+        const pct = Math.round((Number(s.amount_paid) / Number(s.price)) * 100);
+        return (
+          <Card key={s.id} tone={statusTone(s.status)} className="p-3.5 mb-2">
+            <div className="flex justify-between items-start gap-2 mb-1.5">
+              <div>
+                <div className="text-sm font-medium text-ink">{s.buyer_name}</div>
+                <div className="text-[11px] text-dim">{s.stand_number} · {s.ward} · allocated {new Date(s.date_allocated).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })}</div>
+              </div>
+              <Badge tone={statusTone(s.status)}>{s.status}</Badge>
+            </div>
+            <div className="flex justify-between text-[11.5px] mb-1.5">
+              <span className="text-dim">${s.amount_paid} of ${s.price}</span>
+              <span className="text-ink font-semibold">{pct}%</span>
+            </div>
+            <div className="h-1.5 bg-[#E4EAED] rounded-full overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct === 100 ? "#1F8A6F" : "#C08A2E" }} />
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+// ============================================================
+// Ratepayers tab - Records Clerk now owns this data entry
+// ============================================================
+
+interface RatepayerRow {
+  id: string;
+  name: string;
+  ward: string;
+  type: string;
+  balance: number;
+  status: string;
+  last_payment: string | null;
+}
+const RATEPAYER_STATUSES = ["Current", "Arrears"];
+
+function RatepayersTab() {
+  const [ratepayers, setRatepayers] = useState<RatepayerRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+
+  const [name, setName] = useState("");
+  const [ward, setWard] = useState("");
+  const [type, setType] = useState("");
+  const [balance, setBalance] = useState("");
+  const [status, setStatus] = useState(RATEPAYER_STATUSES[0]);
+  const [lastPayment, setLastPayment] = useState("");
+
+  async function load() {
+    const { data } = await supabase.from("ratepayers").select("id, name, ward, type, balance, status, last_payment").order("name");
+    setRatepayers(data ?? []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function submit() {
+    setSubmitting(true);
+    setSubmitError("");
+    const { error } = await supabase.from("ratepayers").insert({ name, ward, type, balance: Number(balance) || 0, status, last_payment: lastPayment || null });
+    setSubmitting(false);
+    if (error) {
+      setSubmitError("Couldn't save this account. Check the details and try again.");
+      return;
+    }
+    setName(""); setWard(""); setType(""); setBalance(""); setStatus(RATEPAYER_STATUSES[0]); setLastPayment("");
+    setAdding(false);
+    await load();
+  }
+
+  if (loading) return <div className="pt-8 text-sm text-dim text-center">Loading...</div>;
+
+  return (
+    <div>
+      {!adding && (
+        <button onClick={() => setAdding(true)} className="w-full py-3 rounded-lg bg-accent text-white text-xs font-semibold mb-4 flex items-center justify-center gap-1.5">
+          <Plus size={14} /> Add a ratepayer account
+        </button>
+      )}
+      {adding && (
+        <Card className="p-4 mb-4">
+          <div className="text-sm font-semibold text-ink mb-3">New ratepayer account</div>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name / business name" className="w-full py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent mb-2.5" />
+          <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+            <input value={ward} onChange={(e) => setWard(e.target.value)} placeholder="Ward" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
+            <input value={type} onChange={(e) => setType(e.target.value)} placeholder="Type (e.g. Business licence)" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
+          </div>
+          <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+            <input value={balance} onChange={(e) => setBalance(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="Outstanding balance ($)" inputMode="decimal" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
+            <select value={status} onChange={(e) => setStatus(e.target.value)} className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent">
+              {RATEPAYER_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <label className="text-[11px] font-semibold text-ink mb-1 block">Last payment date (optional)</label>
+          <input type="date" value={lastPayment} onChange={(e) => setLastPayment(e.target.value)} className="w-full py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent mb-4" />
+          {submitError && <div className="text-[11.5px] text-danger mb-2.5">{submitError}</div>}
+          <div className="flex gap-2">
+            <button onClick={() => setAdding(false)} className="flex-1 py-2.5 rounded-lg border border-border text-xs font-semibold text-ink">Cancel</button>
+            <button onClick={submit} disabled={!name || !ward || !type || submitting} className="flex-1 py-2.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50">
+              {submitting ? "Saving..." : "Save account"}
+            </button>
+          </div>
+        </Card>
+      )}
+      {ratepayers.length === 0 && <div className="text-sm text-dim text-center pt-4 px-6">No ratepayer accounts yet.</div>}
+      {ratepayers.map((r) => (
+        <Card key={r.id} tone={r.status === "Arrears" ? "danger" : "success"} className="p-3.5 mb-2">
+          <div className="flex justify-between items-start gap-2 mb-1.5">
+            <div className="text-sm font-medium text-ink">{r.name}</div>
+            <Badge tone={statusTone(r.status)}>{r.status}</Badge>
+          </div>
+          <div className="flex justify-between text-[11px] text-dim">
+            <span>{r.type} · {r.ward}</span>
+            {r.balance > 0 ? <span className="text-danger font-semibold">${r.balance} due</span> : <span>{r.last_payment ? `Paid ${new Date(r.last_payment).toLocaleDateString([], { day: "numeric", month: "short" })}` : "No payments yet"}</span>}
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================
+// Top-level screen - tab strip only shown for the Records Clerk's own
+// workstation (showCaptureAction=true). CEO's view (showCaptureAction=false)
+// stays exactly as before: digitized records only, no capture, no tabs -
+// they assess Stands/Ratepayers from the Revenue tab instead.
+// ============================================================
+
+export function RecordsScreen({ account, showCaptureAction = true }: { account: Account; showCaptureAction?: boolean }) {
+  const [tab, setTab] = useState<"digitized" | "stands" | "ratepayers">("digitized");
+
+  if (!showCaptureAction) {
+    return (
+      <div className="px-3.5 pt-4 pb-6">
+        <DigitizedTab account={account} showCaptureAction={false} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-3.5 pt-4 pb-6">
+      <div className="flex gap-1.5 mb-4">
+        {([
+          { key: "digitized", label: "Digitized", icon: FileText },
+          { key: "stands", label: "Stands", icon: Landmark },
+          { key: "ratepayers", label: "Ratepayers", icon: Users },
+        ] as const).map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`flex-1 py-2.5 px-1 rounded-lg text-[11px] font-semibold border flex items-center justify-center gap-1 ${
+              tab === t.key ? "border-accent bg-accentSoft text-accent" : "border-border bg-surface text-dim"
+            }`}
+          >
+            <t.icon size={13} /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "digitized" && <DigitizedTab account={account} showCaptureAction />}
+      {tab === "stands" && <StandsTab />}
+      {tab === "ratepayers" && <RatepayersTab />}
     </div>
   );
 }

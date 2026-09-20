@@ -6,6 +6,7 @@ import {
 import type { Account, RevenueSub, TabKey } from "./lib/types";
 import { supabase } from "./lib/supabaseClient";
 import { fetchAccountForUser } from "./lib/auth";
+import { useNotifications } from "./lib/useNotifications";
 import { Header, BottomNav, Topbar, type TabDef } from "./components/layout/Shell";
 import { Sidebar } from "./components/layout/Sidebar";
 import { LoginScreen } from "./screens/LoginScreen";
@@ -62,6 +63,7 @@ export default function App() {
   const [tab, setTab] = useState<TabKey | null>(null);
   const [revenueSub, setRevenueSub] = useState<RevenueSub>("overview");
   const [checkingSession, setCheckingSession] = useState(true);
+  const { items: notifications } = useNotifications(account);
 
   // On first load, check whether a Supabase session already exists (e.g. the
   // user refreshed the page) and restore their account/tab instead of
@@ -134,8 +136,8 @@ export default function App() {
       <Sidebar groups={groups} active={tab} onChange={setTab} account={account} onLogout={handleLogout} />
 
       <div className="flex-1 min-w-0">
-        <Header accountLabel={accountLabel} title={activeTabDef.title} onLogout={handleLogout} />
-        <Topbar title={activeTabDef.title} account={account} />
+        <Header accountLabel={accountLabel} title={activeTabDef.title} onLogout={handleLogout} notifications={notifications} />
+        <Topbar title={activeTabDef.title} account={account} notifications={notifications} onSelectResult={goTo} />
         <main>{renderScreen()}</main>
         <BottomNav tabs={allTabs} active={tab} onChange={setTab} />
       </div>
