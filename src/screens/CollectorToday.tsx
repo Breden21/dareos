@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Camera, MapPin, Check, ChevronRight, ChevronLeft, Wallet, WifiOff, RefreshCw } from "lucide-react";
+import { Camera, MapPin, Check, ChevronRight, ChevronLeft, Wallet, WifiOff, RefreshCw, X } from "lucide-react";
 import { Card, Badge, SectionHeader, IconChip } from "../components/ui/atoms";
 import { supabase } from "../lib/supabaseClient";
 import { getQueue, addToQueue, removeFromQueue, onQueueChanged, syncQueue, type QueuedReceipt } from "../lib/offlineQueue";
+import { compressImage, blobToBase64, uploadEvidencePhoto } from "../lib/photoUpload";
 import type { Account } from "../lib/types";
 
 const FEE_TYPES = ["Market stall", "Terminus fee", "Parking fee", "Other"];
@@ -55,7 +56,8 @@ export function CollectorToday({ account }: { account: Account }) {
   const [step, setStep] = useState<Step>("idle");
   const [feeType, setFeeType] = useState("");
   const [amount, setAmount] = useState("");
-  const [photoAttached, setPhotoAttached] = useState(false);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [lastReceiptNumber, setLastReceiptNumber] = useState("");
@@ -125,9 +127,25 @@ export function CollectorToday({ account }: { account: Account }) {
     setStep("idle");
     setFeeType("");
     setAmount("");
-    setPhotoAttached(false);
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
     setSubmitError("");
     setWasQueuedOffline(false);
+  }
+
+  function handlePhotoSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoFile(file);
+    setPhotoPreviewUrl(URL.createObjectURL(file));
+  }
+
+  function removePhoto() {
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
   }
 
   async function submit() {
@@ -135,7 +153,11 @@ export function CollectorToday({ account }: { account: Account }) {
     setSubmitting(true);
     setSubmitError("");
 
-    const payload = {
+    // Compress once up front - used either for a direct upload or for the
+    // offline base64 queue, whichever path we end up taking below.
+    const compressedPhoto = photoFile ? await compressImage(photoFile) : null;
+
+    const basePayload = {
       point_id: account.collectionPointId,
       fee_type: feeType,
       amount: Number(amount) || 0,
@@ -143,9 +165,11 @@ export function CollectorToday({ account }: { account: Account }) {
     };
 
     // No point even trying the network if the browser already knows we're
-    // offline - straight to the local queue.
+    // offline - straight to the local queue. The photo travels as base64
+    // since it can't be uploaded to Storage without a connection either.
     if (!navigator.onLine) {
-      addToQueue(payload);
+      const photoBase64 = compressedPhoto ? await blobToBase64(compressedPhoto) : undefined;
+      addToQueue({ ...basePayload, photoBase64 });
       setSubmitting(false);
       setLastReceiptNumber("");
       setWasQueuedOffline(true);
@@ -154,7 +178,16 @@ export function CollectorToday({ account }: { account: Account }) {
     }
 
     try {
-      const { data, error } = await supabase.from("receipts").insert(payload).select("receipt_number").single();
+      let photo_url: string | null = null;
+      if (compressedPhoto) {
+        photo_url = await uploadEvidencePhoto(account.id, compressedPhoto);
+      }
+
+      const { data, error } = await supabase
+        .from("receipts")
+        .insert({ ...basePayload, photo_url })
+        .select("receipt_number")
+        .single();
 
       setSubmitting(false);
 
@@ -170,7 +203,8 @@ export function CollectorToday({ account }: { account: Account }) {
         }
         // No error code usually means the request never actually reached
         // the server - treat this as offline and queue it.
-        addToQueue(payload);
+        const photoBase64 = compressedPhoto ? await blobToBase64(compressedPhoto) : undefined;
+        addToQueue({ ...basePayload, photoBase64 });
         setLastReceiptNumber("");
         setWasQueuedOffline(true);
         setStep("done");
@@ -185,7 +219,8 @@ export function CollectorToday({ account }: { account: Account }) {
       // A thrown exception (e.g. "Failed to fetch") means the network
       // request itself never completed - queue it rather than losing what
       // was just collected.
-      addToQueue(payload);
+      const photoBase64 = compressedPhoto ? await blobToBase64(compressedPhoto) : undefined;
+      addToQueue({ ...basePayload, photoBase64 });
       setSubmitting(false);
       setLastReceiptNumber("");
       setWasQueuedOffline(true);
@@ -291,15 +326,29 @@ export function CollectorToday({ account }: { account: Account }) {
             <div className="text-[11px] text-dim mb-1.5 tracking-wide">STEP 3 OF 3</div>
             <div className="font-display text-xl font-semibold text-ink mb-1">Attach a photo</div>
             <div className="text-xs text-dim mb-6">Optional, but recommended for the record</div>
-            <button
-              onClick={() => setPhotoAttached(true)}
-              className={`w-full py-10 rounded-xl border-2 border-dashed flex flex-col items-center gap-2 mb-4 ${photoAttached ? "border-accent bg-accentSoft" : "border-border bg-surface"}`}
-            >
-              {photoAttached ? <Check size={26} className="text-accent" /> : <Camera size={26} className="text-faint" />}
-              <span className={`text-xs font-medium ${photoAttached ? "text-accent" : "text-dim"}`}>
-                {photoAttached ? "Photo attached" : "Tap to attach photo"}
-              </span>
-            </button>
+
+            {photoPreviewUrl ? (
+              <div className="relative mb-4">
+                <img src={photoPreviewUrl} alt="" className="w-full h-48 object-cover rounded-xl border border-border" />
+                <button
+                  onClick={removePhoto}
+                  className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 flex items-center justify-center"
+                >
+                  <X size={16} className="text-white" />
+                </button>
+                <label className="absolute bottom-2 right-2 px-3 py-1.5 rounded-lg bg-white/90 text-xs font-semibold text-ink cursor-pointer">
+                  Retake
+                  <input type="file" accept="image/*" capture="environment" onChange={handlePhotoSelected} className="hidden" />
+                </label>
+              </div>
+            ) : (
+              <label className="w-full py-10 rounded-xl border-2 border-dashed border-border bg-surface flex flex-col items-center gap-2 mb-4 cursor-pointer">
+                <Camera size={26} className="text-faint" />
+                <span className="text-xs font-medium text-dim">Tap to take or choose a photo</span>
+                <input type="file" accept="image/*" capture="environment" onChange={handlePhotoSelected} className="hidden" />
+              </label>
+            )}
+
             <Card tone="accent" className="p-3 mb-6 flex items-center gap-2.5">
               <MapPin size={15} className="text-accent flex-shrink-0" />
               <span className="text-[11.5px] text-ink">Location captured automatically — {point.ward}</span>
@@ -327,7 +376,7 @@ export function CollectorToday({ account }: { account: Account }) {
                 ["Collection point", point.name],
                 ["Fee type", feeType],
                 ["Amount", `$${amount}`],
-                ["Photo", photoAttached ? "Attached" : "Not attached"],
+                ["Photo", photoFile ? photoFile.name : "Not attached"],
                 ["Location", `Captured — ${point.ward}`],
               ].map(([label, val]) => (
                 <div key={label} className="flex justify-between py-2 border-b border-border last:border-0">

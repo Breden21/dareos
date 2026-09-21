@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Camera, FolderOpen, FileText, Check, Search, Plus, Landmark, Users } from "lucide-react";
+import { Camera, FolderOpen, FileText, Check, Search, Plus, Landmark, Users, X } from "lucide-react";
 import { Card, Badge, SectionHeader, IconChip, statusTone } from "../components/ui/atoms";
 import { supabase } from "../lib/supabaseClient";
+import { compressImage, uploadEvidencePhoto } from "../lib/photoUpload";
 import type { Account, StatusTone } from "../lib/types";
 
 // ============================================================
@@ -50,6 +51,8 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("");
   const [ward, setWard] = useState("");
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [justCaptured, setJustCaptured] = useState(false);
@@ -95,14 +98,36 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
     return () => clearTimeout(handle);
   }, [query]);
 
+  function handlePhotoSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoFile(file);
+    setPhotoPreviewUrl(URL.createObjectURL(file));
+  }
+
+  function removePhoto() {
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
+  }
+
   async function submitCapture() {
     setSubmitting(true);
     setSubmitError("");
+
+    let photo_url: string | null = null;
+    if (photoFile) {
+      const compressed = await compressImage(photoFile);
+      photo_url = await uploadEvidencePhoto(account.id, compressed);
+    }
+
     const { error } = await supabase.from("digitized_records").insert({
       title,
       category: category || "Uncategorized",
       ward: ward || account.ward || "Unspecified",
       captured_by: account.name,
+      photo_url,
     });
     setSubmitting(false);
     if (error) {
@@ -114,6 +139,7 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
     setTitle("");
     setCategory("");
     setWard("");
+    removePhoto();
     await load();
   }
 
@@ -177,8 +203,25 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
             value={ward}
             onChange={(e) => setWard(e.target.value)}
             placeholder={account.ward || "e.g. Ward 7"}
-            className="w-full py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent mb-4"
+            className="w-full py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent mb-3"
           />
+
+          <label className="text-xs font-semibold text-ink mb-1.5 block">Evidence photo (optional)</label>
+          {photoPreviewUrl ? (
+            <div className="relative mb-4">
+              <img src={photoPreviewUrl} alt="" className="w-full h-40 object-cover rounded-lg border border-border" />
+              <button onClick={removePhoto} className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 flex items-center justify-center">
+                <X size={14} className="text-white" />
+              </button>
+            </div>
+          ) : (
+            <label className="w-full py-6 rounded-lg border-2 border-dashed border-border bg-bg flex flex-col items-center gap-1.5 mb-4 cursor-pointer">
+              <Camera size={20} className="text-faint" />
+              <span className="text-[11px] text-dim">Tap to take or choose a photo</span>
+              <input type="file" accept="image/*" capture="environment" onChange={handlePhotoSelected} className="hidden" />
+            </label>
+          )}
+
           {submitError && <div className="text-[11.5px] text-danger mb-2.5">{submitError}</div>}
           <div className="flex gap-2">
             <button onClick={() => setCapturing(false)} className="flex-1 py-2.5 rounded-lg border border-border text-xs font-semibold text-ink">

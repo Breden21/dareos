@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { base64ToBlob, uploadEvidencePhoto } from "./photoUpload";
 
 export interface QueuedReceipt {
   localId: string;
@@ -6,6 +7,7 @@ export interface QueuedReceipt {
   fee_type: string;
   amount: number;
   collector_name: string;
+  photoBase64?: string;
   queued_at: string;
 }
 
@@ -66,12 +68,24 @@ export async function syncQueue(): Promise<{ synced: number; remaining: number }
   let synced = 0;
   const stillPending: QueuedReceipt[] = [];
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   for (const item of queue) {
+    // A photo taken while offline was held as base64 text - upload it now
+    // that we're actually online, before inserting the receipt itself.
+    let photo_url: string | null = null;
+    if (item.photoBase64 && user) {
+      photo_url = await uploadEvidencePhoto(user.id, base64ToBlob(item.photoBase64));
+    }
+
     const { error } = await supabase.from("receipts").insert({
       point_id: item.point_id,
       fee_type: item.fee_type,
       amount: item.amount,
       collector_name: item.collector_name,
+      photo_url,
     });
     if (error) {
       stillPending.push(item);
