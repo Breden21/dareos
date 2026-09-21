@@ -48,6 +48,7 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
   const [searching, setSearching] = useState(false);
 
   const [capturing, setCapturing] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("");
   const [ward, setWard] = useState("");
@@ -112,9 +113,43 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
     setPhotoPreviewUrl(null);
   }
 
+  function startEdit(d: RecordRow) {
+    setEditingId(d.id);
+    setCapturing(false);
+    setTitle(d.title);
+    setCategory(d.category);
+    setWard(d.ward);
+  }
+
   async function submitCapture() {
     setSubmitting(true);
     setSubmitError("");
+
+    if (editingId) {
+      // Metadata-only correction - deliberately not touching the photo here,
+      // to keep this a small, proportionate fix rather than a full re-capture.
+      const { error } = await supabase
+        .from("digitized_records")
+        .update({
+          title,
+          category: category || "Uncategorized",
+          ward: ward || account.ward || "Unspecified",
+          updated_by: account.id,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", editingId);
+      setSubmitting(false);
+      if (error) {
+        setSubmitError("Couldn't save these changes. Try again.");
+        return;
+      }
+      setEditingId(null);
+      setTitle("");
+      setCategory("");
+      setWard("");
+      await load();
+      return;
+    }
 
     let photo_url: string | null = null;
     if (photoFile) {
@@ -165,7 +200,7 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
         </Card>
       )}
 
-      {showCaptureAction && !capturing && (
+      {showCaptureAction && !capturing && !editingId && (
         <button
           onClick={() => { setCapturing(true); setJustCaptured(false); }}
           className={`w-full py-3.5 rounded-lg text-sm font-semibold mb-5 flex items-center justify-center gap-1.5 ${
@@ -177,9 +212,9 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
         </button>
       )}
 
-      {capturing && (
+      {(capturing || editingId) && (
         <Card className="p-4 mb-5">
-          <div className="text-sm font-semibold text-ink mb-3">New record</div>
+          <div className="text-sm font-semibold text-ink mb-3">{editingId ? "Edit record" : "New record"}</div>
           <label className="text-xs font-semibold text-ink mb-1.5 block">Title</label>
           <input
             value={title}
@@ -207,7 +242,9 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
           />
 
           <label className="text-xs font-semibold text-ink mb-1.5 block">Evidence photo (optional)</label>
-          {photoPreviewUrl ? (
+          {editingId ? (
+            <div className="text-[11px] text-dim mb-4">Photo not editable here — remove this record and re-digitize if the photo itself needs replacing.</div>
+          ) : photoPreviewUrl ? (
             <div className="relative mb-4">
               <img src={photoPreviewUrl} alt="" className="w-full h-40 object-cover rounded-lg border border-border" />
               <button onClick={removePhoto} className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 flex items-center justify-center">
@@ -224,7 +261,7 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
 
           {submitError && <div className="text-[11.5px] text-danger mb-2.5">{submitError}</div>}
           <div className="flex gap-2">
-            <button onClick={() => setCapturing(false)} className="flex-1 py-2.5 rounded-lg border border-border text-xs font-semibold text-ink">
+            <button onClick={() => { setCapturing(false); setEditingId(null); setTitle(""); setCategory(""); setWard(""); removePhoto(); }} className="flex-1 py-2.5 rounded-lg border border-border text-xs font-semibold text-ink">
               Cancel
             </button>
             <button
@@ -232,7 +269,7 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
               disabled={!title || submitting}
               className="flex-1 py-2.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50"
             >
-              {submitting ? "Saving..." : "Save record"}
+              {submitting ? "Saving..." : editingId ? "Save changes" : "Save record"}
             </button>
           </div>
         </Card>
@@ -291,7 +328,14 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
                 <div className="text-sm font-medium text-ink">{d.title}</div>
                 <div className="text-[11px] text-dim">{d.category} · {d.ward} · {d.captured_by}</div>
               </div>
-              <div className="text-[10.5px] text-faint flex-shrink-0">{timeAgo(d.created_at)}</div>
+              <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                <div className="text-[10.5px] text-faint">{timeAgo(d.created_at)}</div>
+                {showCaptureAction && (
+                  <button onClick={() => startEdit(d)} className="text-[10.5px] text-accent font-semibold underline">
+                    Edit
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </Card>
@@ -308,6 +352,7 @@ interface StandRow {
   id: string;
   stand_number: string;
   ward: string;
+  stand_type: string;
   buyer_name: string;
   price: number;
   amount_paid: number;
@@ -317,10 +362,11 @@ interface StandRow {
 const STAND_TYPES = ["Residential", "Commercial", "Market stall"];
 const STAND_STATUSES = ["Unpaid", "Instalments", "Paid up"];
 
-function StandsTab() {
+function StandsTab({ account }: { account: Account }) {
   const [stands, setStands] = useState<StandRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
@@ -336,7 +382,7 @@ function StandsTab() {
   async function load() {
     const { data } = await supabase
       .from("land_stands")
-      .select("id, stand_number, ward, buyer_name, price, amount_paid, status, date_allocated")
+      .select("id, stand_number, ward, stand_type, buyer_name, price, amount_paid, status, date_allocated")
       .order("date_allocated", { ascending: false });
     setStands(data ?? []);
     setLoading(false);
@@ -346,10 +392,28 @@ function StandsTab() {
     load();
   }, []);
 
+  function resetForm() {
+    setStandNumber(""); setWard(""); setStandType(STAND_TYPES[0]); setBuyerName(""); setPrice(""); setAmountPaid("");
+    setStatus(STAND_STATUSES[0]); setDateAllocated(new Date().toISOString().slice(0, 10));
+  }
+
+  function startEdit(s: StandRow) {
+    setEditingId(s.id);
+    setAdding(false);
+    setStandNumber(s.stand_number);
+    setWard(s.ward);
+    setStandType(s.stand_type);
+    setBuyerName(s.buyer_name);
+    setPrice(String(s.price));
+    setAmountPaid(String(s.amount_paid));
+    setStatus(s.status);
+    setDateAllocated(s.date_allocated.slice(0, 10));
+  }
+
   async function submit() {
     setSubmitting(true);
     setSubmitError("");
-    const { error } = await supabase.from("land_stands").insert({
+    const payload = {
       stand_number: standNumber,
       ward,
       stand_type: standType,
@@ -358,15 +422,20 @@ function StandsTab() {
       amount_paid: Number(amountPaid) || 0,
       status,
       date_allocated: dateAllocated,
-    });
+    };
+
+    const { error } = editingId
+      ? await supabase.from("land_stands").update({ ...payload, updated_by: account.id, updated_at: new Date().toISOString() }).eq("id", editingId)
+      : await supabase.from("land_stands").insert(payload);
+
     setSubmitting(false);
     if (error) {
-      setSubmitError("Couldn't save this stand. Check the details and try again.");
+      setSubmitError(`Couldn't save this stand. Check the details and try again.`);
       return;
     }
-    setStandNumber(""); setWard(""); setStandType(STAND_TYPES[0]); setBuyerName(""); setPrice(""); setAmountPaid("");
-    setStatus(STAND_STATUSES[0]); setDateAllocated(new Date().toISOString().slice(0, 10));
+    resetForm();
     setAdding(false);
+    setEditingId(null);
     await load();
   }
 
@@ -374,14 +443,14 @@ function StandsTab() {
 
   return (
     <div>
-      {!adding && (
+      {!adding && !editingId && (
         <button onClick={() => setAdding(true)} className="w-full py-3 rounded-lg bg-accent text-white text-xs font-semibold mb-4 flex items-center justify-center gap-1.5">
           <Plus size={14} /> Add a stand
         </button>
       )}
-      {adding && (
+      {(adding || editingId) && (
         <Card className="p-4 mb-4">
-          <div className="text-sm font-semibold text-ink mb-3">New land stand</div>
+          <div className="text-sm font-semibold text-ink mb-3">{editingId ? "Edit land stand" : "New land stand"}</div>
           <div className="grid grid-cols-2 gap-2.5 mb-2.5">
             <input value={standNumber} onChange={(e) => setStandNumber(e.target.value)} placeholder="Stand number" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
             <input value={ward} onChange={(e) => setWard(e.target.value)} placeholder="Ward" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
@@ -402,9 +471,9 @@ function StandsTab() {
           </div>
           {submitError && <div className="text-[11.5px] text-danger mb-2.5">{submitError}</div>}
           <div className="flex gap-2">
-            <button onClick={() => setAdding(false)} className="flex-1 py-2.5 rounded-lg border border-border text-xs font-semibold text-ink">Cancel</button>
+            <button onClick={() => { setAdding(false); setEditingId(null); resetForm(); }} className="flex-1 py-2.5 rounded-lg border border-border text-xs font-semibold text-ink">Cancel</button>
             <button onClick={submit} disabled={!standNumber || !ward || !buyerName || !price || submitting} className="flex-1 py-2.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50">
-              {submitting ? "Saving..." : "Save stand"}
+              {submitting ? "Saving..." : editingId ? "Save changes" : "Save stand"}
             </button>
           </div>
         </Card>
@@ -425,9 +494,10 @@ function StandsTab() {
               <span className="text-dim">${s.amount_paid} of ${s.price}</span>
               <span className="text-ink font-semibold">{pct}%</span>
             </div>
-            <div className="h-1.5 bg-[#E4EAED] rounded-full overflow-hidden">
+            <div className="h-1.5 bg-[#E4EAED] rounded-full overflow-hidden mb-2.5">
               <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct === 100 ? "#1F8A6F" : "#C08A2E" }} />
             </div>
+            <button onClick={() => startEdit(s)} className="text-[11px] text-accent font-semibold underline">Edit</button>
           </Card>
         );
       })}
@@ -450,10 +520,11 @@ interface RatepayerRow {
 }
 const RATEPAYER_STATUSES = ["Current", "Arrears"];
 
-function RatepayersTab() {
+function RatepayersTab({ account }: { account: Account }) {
   const [ratepayers, setRatepayers] = useState<RatepayerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
@@ -474,17 +545,38 @@ function RatepayersTab() {
     load();
   }, []);
 
+  function resetForm() {
+    setName(""); setWard(""); setType(""); setBalance(""); setStatus(RATEPAYER_STATUSES[0]); setLastPayment("");
+  }
+
+  function startEdit(r: RatepayerRow) {
+    setEditingId(r.id);
+    setAdding(false);
+    setName(r.name);
+    setWard(r.ward);
+    setType(r.type);
+    setBalance(String(r.balance));
+    setStatus(r.status);
+    setLastPayment(r.last_payment ? r.last_payment.slice(0, 10) : "");
+  }
+
   async function submit() {
     setSubmitting(true);
     setSubmitError("");
-    const { error } = await supabase.from("ratepayers").insert({ name, ward, type, balance: Number(balance) || 0, status, last_payment: lastPayment || null });
+    const payload = { name, ward, type, balance: Number(balance) || 0, status, last_payment: lastPayment || null };
+
+    const { error } = editingId
+      ? await supabase.from("ratepayers").update({ ...payload, updated_by: account.id, updated_at: new Date().toISOString() }).eq("id", editingId)
+      : await supabase.from("ratepayers").insert(payload);
+
     setSubmitting(false);
     if (error) {
       setSubmitError("Couldn't save this account. Check the details and try again.");
       return;
     }
-    setName(""); setWard(""); setType(""); setBalance(""); setStatus(RATEPAYER_STATUSES[0]); setLastPayment("");
+    resetForm();
     setAdding(false);
+    setEditingId(null);
     await load();
   }
 
@@ -492,14 +584,14 @@ function RatepayersTab() {
 
   return (
     <div>
-      {!adding && (
+      {!adding && !editingId && (
         <button onClick={() => setAdding(true)} className="w-full py-3 rounded-lg bg-accent text-white text-xs font-semibold mb-4 flex items-center justify-center gap-1.5">
           <Plus size={14} /> Add a ratepayer account
         </button>
       )}
-      {adding && (
+      {(adding || editingId) && (
         <Card className="p-4 mb-4">
-          <div className="text-sm font-semibold text-ink mb-3">New ratepayer account</div>
+          <div className="text-sm font-semibold text-ink mb-3">{editingId ? "Edit ratepayer account" : "New ratepayer account"}</div>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name / business name" className="w-full py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent mb-2.5" />
           <div className="grid grid-cols-2 gap-2.5 mb-2.5">
             <input value={ward} onChange={(e) => setWard(e.target.value)} placeholder="Ward" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
@@ -515,9 +607,9 @@ function RatepayersTab() {
           <input type="date" value={lastPayment} onChange={(e) => setLastPayment(e.target.value)} className="w-full py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent mb-4" />
           {submitError && <div className="text-[11.5px] text-danger mb-2.5">{submitError}</div>}
           <div className="flex gap-2">
-            <button onClick={() => setAdding(false)} className="flex-1 py-2.5 rounded-lg border border-border text-xs font-semibold text-ink">Cancel</button>
+            <button onClick={() => { setAdding(false); setEditingId(null); resetForm(); }} className="flex-1 py-2.5 rounded-lg border border-border text-xs font-semibold text-ink">Cancel</button>
             <button onClick={submit} disabled={!name || !ward || !type || submitting} className="flex-1 py-2.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50">
-              {submitting ? "Saving..." : "Save account"}
+              {submitting ? "Saving..." : editingId ? "Save changes" : "Save account"}
             </button>
           </div>
         </Card>
@@ -529,10 +621,11 @@ function RatepayersTab() {
             <div className="text-sm font-medium text-ink">{r.name}</div>
             <Badge tone={statusTone(r.status)}>{r.status}</Badge>
           </div>
-          <div className="flex justify-between text-[11px] text-dim">
+          <div className="flex justify-between text-[11px] text-dim mb-2.5">
             <span>{r.type} · {r.ward}</span>
             {r.balance > 0 ? <span className="text-danger font-semibold">${r.balance} due</span> : <span>{r.last_payment ? `Paid ${new Date(r.last_payment).toLocaleDateString([], { day: "numeric", month: "short" })}` : "No payments yet"}</span>}
           </div>
+          <button onClick={() => startEdit(r)} className="text-[11px] text-accent font-semibold underline">Edit</button>
         </Card>
       ))}
     </div>
@@ -578,8 +671,8 @@ export function RecordsScreen({ account, showCaptureAction = true }: { account: 
       </div>
 
       {tab === "digitized" && <DigitizedTab account={account} showCaptureAction />}
-      {tab === "stands" && <StandsTab />}
-      {tab === "ratepayers" && <RatepayersTab />}
+      {tab === "stands" && <StandsTab account={account} />}
+      {tab === "ratepayers" && <RatepayersTab account={account} />}
     </div>
   );
 }
