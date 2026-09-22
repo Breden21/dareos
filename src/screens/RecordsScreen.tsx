@@ -23,6 +23,8 @@ interface RecordRow {
   ward: string;
   captured_by: string;
   created_at: string;
+  updated_by: string | null;
+  updated_at: string | null;
 }
 
 function progressTone(pct: number): StatusTone {
@@ -57,11 +59,19 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [justCaptured, setJustCaptured] = useState(false);
+  const [editorNames, setEditorNames] = useState<Record<string, string>>({});
+
+  async function loadEditorNames() {
+    const { data } = await supabase.from("profiles").select("id, name");
+    const map: Record<string, string> = {};
+    (data ?? []).forEach((p) => { map[p.id] = p.name; });
+    setEditorNames(map);
+  }
 
   async function load() {
     const [{ data: categoryData }, { data: recordData }, { data: allRecords }] = await Promise.all([
       supabase.from("digitization_categories").select("id, name, ward, total_estimated"),
-      supabase.from("digitized_records").select("id, title, category, ward, captured_by, created_at").order("created_at", { ascending: false }).limit(10),
+      supabase.from("digitized_records").select("id, title, category, ward, captured_by, created_at, updated_by, updated_at").order("created_at", { ascending: false }).limit(10),
       supabase.from("digitized_records").select("category, ward"),
     ]);
     setCategories(categoryData ?? []);
@@ -72,6 +82,7 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
       counts[key] = (counts[key] ?? 0) + 1;
     });
     setCategoryCounts(counts);
+    await loadEditorNames();
     setLoading(false);
   }
 
@@ -88,7 +99,7 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
     const handle = setTimeout(() => {
       supabase
         .from("digitized_records")
-        .select("id, title, category, ward, captured_by, created_at")
+        .select("id, title, category, ward, captured_by, created_at, updated_by, updated_at")
         .or(`title.ilike.%${query}%,category.ilike.%${query}%,ward.ilike.%${query}%,captured_by.ilike.%${query}%`)
         .order("created_at", { ascending: false })
         .then(({ data }) => {
@@ -327,6 +338,11 @@ function DigitizedTab({ account, showCaptureAction }: { account: Account; showCa
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium text-ink">{d.title}</div>
                 <div className="text-[11px] text-dim">{d.category} · {d.ward} · {d.captured_by}</div>
+                {d.updated_at && (
+                  <div className="text-[10.5px] text-warn mt-0.5">
+                    Edited by {editorNames[d.updated_by ?? ""] ?? "someone"} · {new Date(d.updated_at).toLocaleDateString([], { day: "numeric", month: "short" })}
+                  </div>
+                )}
               </div>
               <div className="flex flex-col items-end gap-1 flex-shrink-0">
                 <div className="text-[10.5px] text-faint">{timeAgo(d.created_at)}</div>
@@ -358,6 +374,8 @@ interface StandRow {
   amount_paid: number;
   status: string;
   date_allocated: string;
+  updated_by: string | null;
+  updated_at: string | null;
 }
 const STAND_TYPES = ["Residential", "Commercial", "Market stall"];
 const STAND_STATUSES = ["Unpaid", "Instalments", "Paid up"];
@@ -378,13 +396,20 @@ function StandsTab({ account }: { account: Account }) {
   const [amountPaid, setAmountPaid] = useState("");
   const [status, setStatus] = useState(STAND_STATUSES[0]);
   const [dateAllocated, setDateAllocated] = useState(new Date().toISOString().slice(0, 10));
+  const [editorNames, setEditorNames] = useState<Record<string, string>>({});
 
   async function load() {
-    const { data } = await supabase
-      .from("land_stands")
-      .select("id, stand_number, ward, stand_type, buyer_name, price, amount_paid, status, date_allocated")
-      .order("date_allocated", { ascending: false });
+    const [{ data }, { data: profileData }] = await Promise.all([
+      supabase
+        .from("land_stands")
+        .select("id, stand_number, ward, stand_type, buyer_name, price, amount_paid, status, date_allocated, updated_by, updated_at")
+        .order("date_allocated", { ascending: false }),
+      supabase.from("profiles").select("id, name"),
+    ]);
     setStands(data ?? []);
+    const map: Record<string, string> = {};
+    (profileData ?? []).forEach((p) => { map[p.id] = p.name; });
+    setEditorNames(map);
     setLoading(false);
   }
 
@@ -487,6 +512,11 @@ function StandsTab({ account }: { account: Account }) {
               <div>
                 <div className="text-sm font-medium text-ink">{s.buyer_name}</div>
                 <div className="text-[11px] text-dim">{s.stand_number} · {s.ward} · allocated {new Date(s.date_allocated).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })}</div>
+                {s.updated_at && (
+                  <div className="text-[10.5px] text-warn mt-0.5">
+                    Edited by {editorNames[s.updated_by ?? ""] ?? "someone"} · {new Date(s.updated_at).toLocaleDateString([], { day: "numeric", month: "short" })}
+                  </div>
+                )}
               </div>
               <Badge tone={statusTone(s.status)}>{s.status}</Badge>
             </div>
@@ -517,6 +547,8 @@ interface RatepayerRow {
   balance: number;
   status: string;
   last_payment: string | null;
+  updated_by: string | null;
+  updated_at: string | null;
 }
 const RATEPAYER_STATUSES = ["Current", "Arrears"];
 
@@ -534,10 +566,17 @@ function RatepayersTab({ account }: { account: Account }) {
   const [balance, setBalance] = useState("");
   const [status, setStatus] = useState(RATEPAYER_STATUSES[0]);
   const [lastPayment, setLastPayment] = useState("");
+  const [editorNames, setEditorNames] = useState<Record<string, string>>({});
 
   async function load() {
-    const { data } = await supabase.from("ratepayers").select("id, name, ward, type, balance, status, last_payment").order("name");
+    const [{ data }, { data: profileData }] = await Promise.all([
+      supabase.from("ratepayers").select("id, name, ward, type, balance, status, last_payment, updated_by, updated_at").order("name"),
+      supabase.from("profiles").select("id, name"),
+    ]);
     setRatepayers(data ?? []);
+    const map: Record<string, string> = {};
+    (profileData ?? []).forEach((p) => { map[p.id] = p.name; });
+    setEditorNames(map);
     setLoading(false);
   }
 
@@ -621,10 +660,15 @@ function RatepayersTab({ account }: { account: Account }) {
             <div className="text-sm font-medium text-ink">{r.name}</div>
             <Badge tone={statusTone(r.status)}>{r.status}</Badge>
           </div>
-          <div className="flex justify-between text-[11px] text-dim mb-2.5">
+          <div className="flex justify-between text-[11px] text-dim mb-1">
             <span>{r.type} · {r.ward}</span>
             {r.balance > 0 ? <span className="text-danger font-semibold">${r.balance} due</span> : <span>{r.last_payment ? `Paid ${new Date(r.last_payment).toLocaleDateString([], { day: "numeric", month: "short" })}` : "No payments yet"}</span>}
           </div>
+          {r.updated_at && (
+            <div className="text-[10.5px] text-warn mb-2">
+              Edited by {editorNames[r.updated_by ?? ""] ?? "someone"} · {new Date(r.updated_at).toLocaleDateString([], { day: "numeric", month: "short" })}
+            </div>
+          )}
           <button onClick={() => startEdit(r)} className="text-[11px] text-accent font-semibold underline">Edit</button>
         </Card>
       ))}

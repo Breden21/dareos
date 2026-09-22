@@ -24,7 +24,10 @@ export function DriverHome({ account }: { account: Account }) {
   const [odometer, setOdometer] = useState("");
 
   async function load() {
-    if (!account.vehicleId) return;
+    if (!account.vehicleId) {
+      setLoading(false);
+      return;
+    }
     const { data: assetData } = await supabase.from("assets").select("name, ward, condition").eq("id", account.vehicleId).single();
     const { data: detailData } = await supabase
       .from("vehicle_details")
