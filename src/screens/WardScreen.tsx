@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
-import { Card, Badge, statusTone } from "../components/ui/atoms";
+import { Plus, Building2, MessageSquare } from "lucide-react";
+import { Card, Badge, SectionHeader, IconChip, statusTone } from "../components/ui/atoms";
 import { supabase } from "../lib/supabaseClient";
 
 interface AssetRow {
@@ -76,8 +76,27 @@ export function WardScreen() {
 
   if (loading) return <div className="px-3.5 lg:px-8 pt-8 text-sm text-dim text-center">Loading...</div>;
 
+  const needsAttention = assets.filter((a) => a.condition !== "Working");
+  const openRequests = requests.filter((r) => r.status !== "Resolved");
+
   return (
     <div className="px-3.5 lg:px-8 pt-4 lg:pt-7 pb-6 lg:pb-10 lg:max-w-[900px]">
+      {/* Overview strip, same KPI language used across the app */}
+      <div className="grid grid-cols-3 gap-2 lg:gap-3 mb-5">
+        <Card className="p-3 lg:p-4">
+          <div className="font-display text-lg lg:text-2xl font-semibold text-ink mb-0.5">{assets.length}</div>
+          <div className="text-[10px] lg:text-xs text-dim leading-snug">Infrastructure assets</div>
+        </Card>
+        <Card tone={needsAttention.length > 0 ? "warn" : "success"} className="p-3 lg:p-4">
+          <div className="font-display text-lg lg:text-2xl font-semibold text-ink mb-0.5">{needsAttention.length}</div>
+          <div className="text-[10px] lg:text-xs text-dim leading-snug">Need attention</div>
+        </Card>
+        <Card tone={openRequests.length > 0 ? "warn" : "success"} className="p-3 lg:p-4">
+          <div className="font-display text-lg lg:text-2xl font-semibold text-ink mb-0.5">{openRequests.length}</div>
+          <div className="text-[10px] lg:text-xs text-dim leading-snug">Open requests</div>
+        </Card>
+      </div>
+
       <div className="flex gap-1.5 mb-4">
         {(["assets", "requests"] as const).map((key) => (
           <button
@@ -126,32 +145,46 @@ export function WardScreen() {
         </Card>
       )}
 
-      <div className="lg:grid lg:grid-cols-2 lg:gap-3">
-        {sub === "assets" && assets.length === 0 && <div className="text-xs text-dim text-center py-6 col-span-2">No infrastructure assets recorded yet.</div>}
-        {sub === "assets" &&
-          assets.map((a) => (
+      {sub === "assets" && assets.length === 0 && <div className="text-xs text-dim text-center py-6">No infrastructure assets recorded yet.</div>}
+      {sub === "assets" && (
+        <div className="lg:grid lg:grid-cols-2 lg:gap-3">
+          {assets.map((a) => (
             <Card key={a.id} tone={statusTone(a.condition)} className="p-3.5 mb-2 lg:mb-0">
-              <div className="flex justify-between items-start gap-2 mb-1.5">
-                <div className="text-sm font-medium text-ink">{a.name}</div>
-                <Badge tone={statusTone(a.condition)}>{a.condition}</Badge>
+              <div className="flex items-center gap-3">
+                <IconChip icon={Building2} tone={statusTone(a.condition)} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="text-sm font-medium text-ink truncate">{a.name}</div>
+                    <Badge tone={statusTone(a.condition)}>{a.condition}</Badge>
+                  </div>
+                  <div className="text-[11px] text-dim mt-0.5">{a.asset_type} · {a.ward}</div>
+                </div>
               </div>
-              <div className="text-[11px] text-dim">{a.asset_type} · {a.ward}</div>
             </Card>
           ))}
+        </div>
+      )}
 
-        {sub === "requests" && requests.length === 0 && <div className="text-xs text-dim text-center py-6 col-span-2">No service requests logged yet.</div>}
-        {sub === "requests" &&
-          requests.map((r) => (
+      {sub === "requests" && requests.length === 0 && <div className="text-xs text-dim text-center py-6">No service requests logged yet.</div>}
+      {sub === "requests" && (
+        <div className="lg:grid lg:grid-cols-2 lg:gap-3">
+          {requests.map((r) => (
             <Card key={r.id} tone={statusTone(r.status)} className="p-3.5 mb-2 lg:mb-0">
-              <div className="flex justify-between items-start gap-2 mb-2">
-                <div className="text-[11px] text-dim">{r.category} · {r.ward} · via {r.channel}</div>
-                <Badge tone={statusTone(r.status)}>{r.status}</Badge>
+              <div className="flex items-start gap-3">
+                <IconChip icon={MessageSquare} tone={statusTone(r.status)} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-start gap-2 mb-1.5">
+                    <div className="text-[11px] text-dim">{r.category} · {r.ward} · via {r.channel}</div>
+                    <Badge tone={statusTone(r.status)}>{r.status}</Badge>
+                  </div>
+                  <div className="text-sm text-ink leading-relaxed mb-1.5">{r.description}</div>
+                  <div className="text-[10.5px] text-faint">{r.raised_by} · {new Date(r.created_at).toLocaleDateString([], { day: "numeric", month: "short" })}</div>
+                </div>
               </div>
-              <div className="text-sm text-ink leading-relaxed mb-2">{r.description}</div>
-              <div className="text-[10.5px] text-faint">{r.raised_by} · {new Date(r.created_at).toLocaleDateString([], { day: "numeric", month: "short" })}</div>
             </Card>
           ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

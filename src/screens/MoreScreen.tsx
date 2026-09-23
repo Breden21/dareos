@@ -131,6 +131,13 @@ export function MoreScreen() {
   const [mDate, setMDate] = useState(new Date().toISOString().slice(0, 10));
   const [mResolutions, setMResolutions] = useState("");
 
+  const [addingStaff, setAddingStaff] = useState(false);
+  const [sSubmitting, setSSubmitting] = useState(false);
+  const [sError, setSError] = useState("");
+  const [sDepartment, setSDepartment] = useState("");
+  const [sFilled, setSFilled] = useState("");
+  const [sEstablishment, setSEstablishment] = useState("");
+
   async function load() {
     const [{ data: assetData }, { data: driverData }, { data: staffData }, { data: minutesData }] = await Promise.all([
       supabase.from("assets").select("id, name, ward, condition, vehicle_details(fuel_pct, odometer_km, current_task, assigned_driver, last_ping, last_lat, last_lng)").eq("category", "vehicle"),
@@ -244,6 +251,24 @@ export function MoreScreen() {
     await load();
   }
 
+  async function submitStaff() {
+    setSSubmitting(true);
+    setSError("");
+    const { error } = await supabase.from("staff_establishment").insert({
+      department: sDepartment,
+      filled: Number(sFilled) || 0,
+      establishment: Number(sEstablishment) || 0,
+    });
+    setSSubmitting(false);
+    if (error) {
+      setSError("Couldn't save this department. Check the details and try again.");
+      return;
+    }
+    setSDepartment(""); setSFilled(""); setSEstablishment("");
+    setAddingStaff(false);
+    await load();
+  }
+
   if (loading) return <div className="px-3.5 lg:px-8 pt-8 text-sm text-dim text-center">Loading...</div>;
 
   const needsAttention = fleet.filter((v) => v.condition !== "Working");
@@ -330,6 +355,38 @@ export function MoreScreen() {
         <div>
           <div className="mt-4.5 lg:mt-0">
             <SectionHeader title="Establishment" />
+
+            {!addingStaff && (
+              <button
+                onClick={() => setAddingStaff(true)}
+                className="w-full py-3 rounded-lg bg-accent text-white text-xs font-semibold mb-4 flex items-center justify-center gap-1.5"
+              >
+                <Plus size={14} /> Add a department
+              </button>
+            )}
+
+            {addingStaff && (
+              <Card className="p-4 mb-4">
+                <div className="text-sm font-semibold text-ink mb-3">New department</div>
+                <input value={sDepartment} onChange={(e) => setSDepartment(e.target.value)} placeholder="Department (e.g. Finance)" className="w-full py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent mb-2.5" />
+                <div className="grid grid-cols-2 gap-2.5 mb-4">
+                  <input value={sFilled} onChange={(e) => setSFilled(e.target.value.replace(/[^0-9]/g, ""))} placeholder="Filled posts" inputMode="numeric" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
+                  <input value={sEstablishment} onChange={(e) => setSEstablishment(e.target.value.replace(/[^0-9]/g, ""))} placeholder="Approved establishment" inputMode="numeric" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
+                </div>
+                {sError && <div className="text-[11.5px] text-danger mb-2.5">{sError}</div>}
+                <div className="flex gap-2">
+                  <button onClick={() => setAddingStaff(false)} className="flex-1 py-2.5 rounded-lg border border-border text-xs font-semibold text-ink">Cancel</button>
+                  <button
+                    onClick={submitStaff}
+                    disabled={!sDepartment || !sEstablishment || sSubmitting}
+                    className="flex-1 py-2.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50"
+                  >
+                    {sSubmitting ? "Saving..." : "Save department"}
+                  </button>
+                </div>
+              </Card>
+            )}
+
             {staff.length === 0 && <div className="text-xs text-dim text-center py-4">No staffing data recorded yet.</div>}
             <Card className="overflow-hidden">
               {staff.map((d, i, arr) => {
