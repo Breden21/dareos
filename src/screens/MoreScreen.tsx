@@ -6,6 +6,7 @@ import { supabase } from "../lib/supabaseClient";
 interface VehicleRow {
   id: string;
   name: string;
+  asset_type: string;
   ward: string;
   condition: string;
   fuel_pct: number;
@@ -36,7 +37,7 @@ interface MinutesRow {
 
 const CONDITIONS = ["Working", "Needs repair", "Poor"];
 
-function FleetCard({ v, drivers, onAssign }: { v: VehicleRow; drivers: DriverRow[]; onAssign: (vehicleId: string, driverId: string | null) => void }) {
+function FleetCard({ v, drivers, onAssign, onEdit }: { v: VehicleRow; drivers: DriverRow[]; onAssign: (vehicleId: string, driverId: string | null) => void; onEdit: (v: VehicleRow) => void }) {
   const fuelColor = v.fuel_pct < 30 ? "text-danger" : v.fuel_pct < 55 ? "text-warn" : "text-success";
   const fuelHex = v.fuel_pct < 30 ? "#B33F3F" : v.fuel_pct < 55 ? "#C08A2E" : "#1F8A6F";
   const currentDriver = drivers.find((d) => d.vehicle_id === v.id);
@@ -52,6 +53,9 @@ function FleetCard({ v, drivers, onAssign }: { v: VehicleRow; drivers: DriverRow
           </div>
           <div className="text-[11px] text-dim mt-0.5">{v.ward || "No home ward"}</div>
         </div>
+        <button onClick={() => onEdit(v)} className="text-[10.5px] text-accent font-semibold underline flex-shrink-0 mt-0.5">
+          Edit
+        </button>
       </div>
 
       <div className="text-xs text-ink mb-3 bg-surface/60 rounded-lg px-3 py-2 border border-border">
@@ -115,6 +119,7 @@ export function MoreScreen() {
   const [assignError, setAssignError] = useState("");
 
   const [addingVehicle, setAddingVehicle] = useState(false);
+  const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
   const [vSubmitting, setVSubmitting] = useState(false);
   const [vError, setVError] = useState("");
   const [vName, setVName] = useState("");
@@ -140,7 +145,7 @@ export function MoreScreen() {
 
   async function load() {
     const [{ data: assetData }, { data: driverData }, { data: staffData }, { data: minutesData }] = await Promise.all([
-      supabase.from("assets").select("id, name, ward, condition, vehicle_details(fuel_pct, odometer_km, current_task, assigned_driver, last_ping, last_lat, last_lng)").eq("category", "vehicle"),
+      supabase.from("assets").select("id, name, asset_type, ward, condition, vehicle_details(fuel_pct, odometer_km, current_task, assigned_driver, last_ping, last_lat, last_lng)").eq("category", "vehicle"),
       supabase.from("profiles").select("id, name, vehicle_id").eq("role", "driver"),
       supabase.from("staff_establishment").select("id, department, filled, establishment"),
       supabase.from("council_minutes").select("id, committee, meeting_date, resolutions").order("meeting_date", { ascending: false }),
@@ -149,6 +154,7 @@ export function MoreScreen() {
     const vehicles: VehicleRow[] = (assetData ?? []).map((a: any) => ({
       id: a.id,
       name: a.name,
+      asset_type: a.asset_type,
       ward: a.ward,
       condition: a.condition,
       fuel_pct: a.vehicle_details?.fuel_pct ?? 0,
@@ -200,9 +206,46 @@ export function MoreScreen() {
     await load();
   }
 
+  function resetVehicleForm() {
+    setVName(""); setVType(""); setVWard(""); setVCondition(CONDITIONS[0]); setVFuel("100"); setVOdometer("0");
+  }
+
+  function startEditVehicle(v: VehicleRow) {
+    setEditingVehicleId(v.id);
+    setAddingVehicle(false);
+    setVName(v.name);
+    setVType(v.asset_type);
+    setVWard(v.ward ?? "");
+    setVCondition(v.condition);
+    setVFuel(String(v.fuel_pct));
+    setVOdometer(String(v.odometer_km));
+  }
+
   async function submitVehicle() {
     setVSubmitting(true);
     setVError("");
+
+    if (editingVehicleId) {
+      const { error: assetError } = await supabase
+        .from("assets")
+        .update({ name: vName, asset_type: vType, ward: vWard || null, condition: vCondition })
+        .eq("id", editingVehicleId);
+      const { error: detailError } = await supabase
+        .from("vehicle_details")
+        .update({ fuel_pct: Number(vFuel) || 0, odometer_km: Number(vOdometer) || 0 })
+        .eq("asset_id", editingVehicleId);
+
+      setVSubmitting(false);
+      if (assetError || detailError) {
+        setVError("Couldn't save these changes. Try again.");
+        return;
+      }
+      resetVehicleForm();
+      setEditingVehicleId(null);
+      await load();
+      return;
+    }
+
     const { data: asset, error: assetError } = await supabase
       .from("assets")
       .insert({ name: vName, asset_type: vType, ward: vWard || null, condition: vCondition, category: "vehicle" })
@@ -227,7 +270,7 @@ export function MoreScreen() {
       return;
     }
 
-    setVName(""); setVType(""); setVWard(""); setVCondition(CONDITIONS[0]); setVFuel("100"); setVOdometer("0");
+    resetVehicleForm();
     setAddingVehicle(false);
     await load();
   }
@@ -301,7 +344,7 @@ export function MoreScreen() {
         <div>
           <SectionHeader title="Fleet" />
 
-          {!addingVehicle && (
+          {!addingVehicle && !editingVehicleId && (
             <button
               onClick={() => setAddingVehicle(true)}
               className="w-full py-3 rounded-lg bg-accent text-white text-xs font-semibold mb-4 flex items-center justify-center gap-1.5"
@@ -310,9 +353,9 @@ export function MoreScreen() {
             </button>
           )}
 
-          {addingVehicle && (
+          {(addingVehicle || editingVehicleId) && (
             <Card className="p-4 mb-4">
-              <div className="text-sm font-semibold text-ink mb-3">New vehicle</div>
+              <div className="text-sm font-semibold text-ink mb-3">{editingVehicleId ? "Edit vehicle" : "New vehicle"}</div>
               <input value={vName} onChange={(e) => setVName(e.target.value)} placeholder="Name (e.g. Toyota Hilux - ABC 1234)" className="w-full py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent mb-2.5" />
               <div className="grid grid-cols-2 gap-2.5 mb-2.5">
                 <input value={vType} onChange={(e) => setVType(e.target.value)} placeholder="Type (e.g. Pickup truck)" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
@@ -325,18 +368,20 @@ export function MoreScreen() {
                 <input value={vFuel} onChange={(e) => setVFuel(e.target.value.replace(/[^0-9]/g, ""))} placeholder="Fuel %" inputMode="numeric" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
                 <input value={vOdometer} onChange={(e) => setVOdometer(e.target.value.replace(/[^0-9]/g, ""))} placeholder="Odometer (km)" inputMode="numeric" className="py-2.5 px-3 rounded-lg border border-border text-sm outline-none focus:border-accent" />
               </div>
-              <div className="text-[10.5px] text-dim mb-4 leading-relaxed">
-                You'll assign a driver to this vehicle from the fleet list once it's saved.
-              </div>
+              {!editingVehicleId && (
+                <div className="text-[10.5px] text-dim mb-4 leading-relaxed">
+                  You'll assign a driver to this vehicle from the fleet list once it's saved.
+                </div>
+              )}
               {vError && <div className="text-[11.5px] text-danger mb-2.5">{vError}</div>}
               <div className="flex gap-2">
-                <button onClick={() => setAddingVehicle(false)} className="flex-1 py-2.5 rounded-lg border border-border text-xs font-semibold text-ink">Cancel</button>
+                <button onClick={() => { setAddingVehicle(false); setEditingVehicleId(null); resetVehicleForm(); }} className="flex-1 py-2.5 rounded-lg border border-border text-xs font-semibold text-ink">Cancel</button>
                 <button
                   onClick={submitVehicle}
                   disabled={!vName || !vType || vSubmitting}
                   className="flex-1 py-2.5 rounded-lg bg-accent text-white text-xs font-semibold disabled:opacity-50"
                 >
-                  {vSubmitting ? "Saving..." : "Save vehicle"}
+                  {vSubmitting ? "Saving..." : editingVehicleId ? "Save changes" : "Save vehicle"}
                 </button>
               </div>
             </Card>
@@ -348,8 +393,8 @@ export function MoreScreen() {
             </div>
           )}
           {fleet.length === 0 && <div className="text-xs text-dim text-center py-6">No vehicles recorded yet.</div>}
-          {needsAttention.map((v) => <FleetCard key={v.id} v={v} drivers={drivers} onAssign={assignDriver} />)}
-          {rest.map((v) => <FleetCard key={v.id} v={v} drivers={drivers} onAssign={assignDriver} />)}
+          {needsAttention.map((v) => <FleetCard key={v.id} v={v} drivers={drivers} onAssign={assignDriver} onEdit={startEditVehicle} />)}
+          {rest.map((v) => <FleetCard key={v.id} v={v} drivers={drivers} onAssign={assignDriver} onEdit={startEditVehicle} />)}
         </div>
 
         <div>
